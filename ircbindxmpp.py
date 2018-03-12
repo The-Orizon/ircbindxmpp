@@ -8,7 +8,6 @@ import sys
 import time
 
 import config
-import libirc
 
 
 def FilterBadChars(s):
@@ -31,12 +30,15 @@ class XMPPBot(sleekxmpp.ClientXMPP):
         try:
             if msg['type'] not in ('chat', 'normal'):
                 return
+            if " (IRC): " in msg["body"]:
+                return
+
             from_jid = msg['from'].bare
             for i in config.XMPP['forward']:
                 if i[0] == from_jid:
                     for l in msg['body'].splitlines():
                         sys.stderr.write('< %s\n' % l)
-                        irc.say(i[1], '(GTalk) %s' % l)
+                        xmpp.send_message(mto=i[1], mbody=msg, mtype='chat')
         except UnicodeEncodeError:
             pass
         except socket.error:
@@ -55,14 +57,6 @@ class XMPPBot(sleekxmpp.ClientXMPP):
 
 if __name__ == '__main__':
     try:
-        irc = libirc.IRCConnection()
-        irc.connect((config.IRC['server'], config.IRC['port']), use_ssl=config.IRC['ssl'])
-        irc.setnick(config.IRC['nick'])
-        irc.setuser()
-        if config.IRC['password']:
-            irc.say('NickServ', 'identify %s' % config.IRC['password'])
-        for i in config.IRC['forward']:
-            irc.join(i[0])
         xmpp = XMPPBot(config.XMPP['JID'], config.XMPP['password'])
         xmpp.register_plugin('xep_0030')  # Service Discovery
         xmpp.register_plugin('xep_0004')  # Data Forms
@@ -71,28 +65,11 @@ if __name__ == '__main__':
         if xmpp.connect((config.XMPP['server'], config.XMPP['port'])):
             xmpp.process(block=False)
         else:
-            irc.quit('Cannot connect to XMPP.')
             exit()
-        while irc.sock:
-            line = irc.parse(block=True)
-            if not line:
-                continue
-            if line['cmd'] == 'PRIVMSG':
-                if not line['msg']:
-                    continue
-                if line['msg'].startswith('\x01ACTION '):
-                    msg = '* %s (IRC) %s' % (line['nick'], FilterBadChars(line['msg'][8:].rstrip('\x01')))
-                else:
-                    msg = '%s (IRC): %s' % (line['nick'], FilterBadChars(line['msg']))
-                for i in config.IRC['forward']:
-                    if line['dest'] == i[0]:
-                        sys.stderr.write('> %s\n' % FilterBadChars(line['msg']))
-                        xmpp.send_message(mto=i[1], mbody=msg, mtype='chat')
         else:
             raise socket.error
     except KeyboardInterrupt:
         xmpp.disconnect(wait=True)
-        irc.quit()
     except UnicodeEncodeError:
         pass
     except SystemExit:
